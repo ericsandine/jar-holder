@@ -17,8 +17,8 @@ need to regenerate and reprint the disc:
 
 Organic shapes are signed distance fields meshed with marching cubes. The jar
 pocket, pegs, peg holes and engraved text are exact CAD booleans (manifold3d).
-Needs numpy, scipy, scikit-image, trimesh, manifold3d and matplotlib
-(already installed in .venv: run it with .venv/bin/python atuin.py).
+Setup and the rest of the workflow (checks, renders, versioning): see README.md
+and AGENTS.md.
 """
 import argparse
 import math
@@ -29,6 +29,11 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 
 import numpy as np
+
+# Semantic version of the printable geometry, engraved under both parts.
+# MAJOR: base/disc interface changed (old discs no longer fit new bases).
+# MINOR: visible design change or new default jar. PATCH: printability/mesh fixes.
+__version__ = '1.0.0'
 
 
 @dataclass
@@ -589,7 +594,7 @@ def build_base(P, out_dir):
                + Manifold.cylinder(ch, pr, pr - ch, circular_segments=64).translate((0, 0, P.peg_h + 1 - ch)))
         m += peg.translate((el.o[0], el.o[1], Z_TOP - 1.0))
     m -= text_solid([("GREAT A'TUIN", 13.0, (0, 14), 0), ("Chelys galactica", 7.5, (0, -3), 0),
-                     ("THE TURTLE MOVES", 7.5, (0, -18), 0)], 0.6)
+                     ("THE TURTLE MOVES", 7.5, (0, -18), 0), (f'v{__version__}', 6.0, (0, -31), 0)], 0.6)
     export(m, os.path.join(out_dir, 'great_atuin_base.stl'))
     print(f'  ({time.time() - t:.0f}s)')
 
@@ -616,6 +621,7 @@ def build_disc(P, out_dir):
         names.append((name, 5.5, ((EL_R + 13) * math.cos(b), (EL_R + 13) * math.sin(b)),
                       math.degrees(b) - 90 if math.sin(b) >= 0 else math.degrees(b) + 90))
     names.append(("THE TURTLE MOVES", 8.0, (0, 0), 0))
+    names.append((f'v{__version__}', 6.0, (0, -11), 0))
     m -= text_solid(names, 0.6)
     export(m, os.path.join(out_dir, f'great_atuin_disc_{P.jar_diameter:.1f}mm.stl'))
     print(f'  ({time.time() - t:.0f}s)')
@@ -642,6 +648,7 @@ def main():
     P = Params(jar_diameter=a.jar_diameter, clearance=a.clearance,
                pocket_depth=a.pocket_depth, resolution=a.resolution)
     rp, R, H = disc_dims(P)
+    print(f"Great A'Tuin jar stand v{__version__}")
     print(f'jar {P.jar_diameter:.1f} mm -> pocket {2 * rp:.1f} mm x {P.pocket_depth:.0f} mm deep, '
           f'disc {2 * R:.1f} mm; disc rests at z = {Z_TOP:.1f} mm')
     if 2 * (EL_R + P.peg_d) > 2 * R:
