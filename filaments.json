@@ -1,0 +1,42 @@
+{
+  "printer": "Bambu Lab P2S 0.4 nozzle",
+  "process": "0.20mm Standard @BBL P2S",
+  "parts": [
+    {
+      "part": "turtle",
+      "label": "Great A'Tuin",
+      "stl": "great_atuin_base_turtle.stl",
+      "filament": "PLA Galaxy",
+      "color": "Green",
+      "code": "13503",
+      "hex": "#3B665E",
+      "preset": "Bambu PLA Galaxy @BBL P2S",
+      "url": "https://us.store.bambulab.com/products/pla-galaxy?id=41834260070536",
+      "why": "Green with a gold shimmer: a star turtle swimming through space. The sparkle also hides layer lines on the big shell."
+    },
+    {
+      "part": "elephants",
+      "label": "World Elephants",
+      "stl": "great_atuin_base_elephants.stl",
+      "filament": "PLA Matte",
+      "color": "Ash Gray",
+      "code": "11102",
+      "hex": "#9B9EA0",
+      "preset": "Bambu PLA Matte @BBL P2S",
+      "url": "https://us.store.bambulab.com/products/pla-matte?id=41078280192136",
+      "why": "A flat, hide-like grey."
+    },
+    {
+      "part": "disc",
+      "label": "The Disc",
+      "stl": "great_atuin_disc_{jar}mm.stl",
+      "filament": "PLA Matte",
+      "color": "Marine Blue",
+      "code": "11600",
+      "hex": "#0078BF",
+      "preset": "Bambu PLA Matte @BBL P2S",
+      "url": "https://us.store.bambulab.com/products/pla-matte?id=41078280093832",
+      "why": "Sea blue for the Rimsea and the Rimfall."
+    }
+  ]
+}

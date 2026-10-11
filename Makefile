@@ -3,9 +3,9 @@ PY      ?= .venv/bin/python
 BLENDER ?= blender
 JAR     ?= 152.4
 
-.PHONY: all setup stl disc check renders
+.PHONY: all setup stl disc 3mf slice check renders
 
-all: stl check renders
+all: stl 3mf check renders
 
 setup:
 	python3 -m venv .venv
@@ -16,6 +16,12 @@ stl:
 
 disc:
 	$(PY) atuin.py --jar-diameter $(JAR) --parts disc
+
+3mf:
+	$(PY) tools/make_3mf.py --jar-diameter $(JAR)
+
+slice:
+	$(PY) tools/make_3mf.py --jar-diameter $(JAR) --slice
 
 check:
 	$(PY) tools/check.py --jar-diameter $(JAR)

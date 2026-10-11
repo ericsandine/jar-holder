@@ -8,6 +8,11 @@
                              the Rimfall pours off its edge. Holes underneath key
                              onto pegs on the elephants' backs.
 
+For a two-colour base (grey elephants on a green turtle) the base is also written
+as two parts that fit together exactly, great_atuin_base_turtle.stl and
+great_atuin_base_elephants.stl; tools/make_3mf.py packs them into a Bambu Studio
+project with a filament assigned to each.
+
 Only the disc depends on the jar, so once you have an exact measurement you only
 need to regenerate and reprint the disc:
 
@@ -33,7 +38,7 @@ import numpy as np
 # Semantic version of the printable geometry, engraved under both parts.
 # MAJOR: base/disc interface changed (old discs no longer fit new bases).
 # MINOR: visible design change or new default jar. PATCH: printability/mesh fixes.
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 
 
 @dataclass
@@ -418,6 +423,18 @@ def base_sdf(p):
 BASE_BOUNDS = ((-112.0, -128.0, -1.0), (146.0, 128.0, Z_TOP + 2.0))
 
 
+def elephants_region(p):
+    """Where the elephants' filament goes: the elephants grown by 0.8 mm, so the region
+    contains their printed skin, but only outside the shell, so it never takes turtle."""
+    d = np.full(len(p), np.inf)
+    for el in ELEPHANTS:
+        d = np.minimum(d, bounded(p, el.bound_c, el.bound_r, el.sdf))
+    return np.maximum(d - 0.8, -dome(p))
+
+
+ELEPHANT_BOUNDS = ((-80.0, -80.0, 30.0), (80.0, 80.0, Z_TOP + 2.0))
+
+
 # ------------------------------------------------------------------- the Disc
 
 def disc_dims(P):
@@ -464,6 +481,8 @@ _W = {}
 def _sdf_for(part, P):
     if part == 'base':
         return base_sdf
+    if part == 'elephants':
+        return elephants_region
     return lambda p: disc_sdf(p, P)
 
 
@@ -503,10 +522,17 @@ def mesh_sdf(part, P, bounds, h, block=24):
     faces = np.concatenate([f + o for (_, f), o in zip(results, offsets)])
     # weld the blocks together, and fuse the near-duplicate vertices marching cubes makes
     # where the surface grazes a sample (they would collide at STL float precision)
+    return weld(verts, faces, 2e-4)
+
+
+def weld(verts, faces, tol):
+    """Fuse vertices closer than `tol` and drop the triangles that collapse. STL stores
+    float32 positions, so near-coincident vertices would otherwise merge on load and
+    leave edges shared by four faces."""
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
     from scipy.spatial import cKDTree
-    pairs = cKDTree(verts).query_pairs(2e-4, output_type='ndarray')
+    pairs = cKDTree(verts).query_pairs(tol, output_type='ndarray')
     n = len(verts)
     _, label = connected_components(
         coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(n, n)), directed=False)
@@ -571,15 +597,16 @@ def text_solid(lines, depth):
     return Manifold.batch_boolean(tools, OpType.Add)
 
 
-def export(m, path):
+def export(m, path, min_volume=1.0):
     import trimesh
     from manifold3d import Manifold
-    parts = [c for c in m.decompose() if abs(c.volume()) > 1.0]   # drop sub-mm specks
+    parts = [c for c in m.decompose() if abs(c.volume()) > min_volume]   # drop sub-mm specks
     m = Manifold.compose(parts)
     mesh = m.to_mesh()
-    trimesh.Trimesh(mesh.vert_properties[:, :3], mesh.tri_verts, process=False).export(path)
+    v, f = weld(mesh.vert_properties[:, :3].astype(np.float64), mesh.tri_verts, 1e-4)
+    trimesh.Trimesh(v, f, process=False).export(path)
     lo, hi = m.bounding_box()[:3], m.bounding_box()[3:]
-    print(f'  wrote {path}: {m.num_tri():,} triangles, '
+    print(f'  wrote {path}: {len(f):,} triangles, '
           f'{hi[0] - lo[0]:.1f} x {hi[1] - lo[1]:.1f} x {hi[2] - lo[2]:.1f} mm, '
           f'{m.volume() / 1000:.0f} cm^3 solid')
 
@@ -596,6 +623,13 @@ def build_base(P, out_dir):
     m -= text_solid([("GREAT A'TUIN", 13.0, (0, 14), 0), ("Chelys galactica", 7.5, (0, -3), 0),
                      ("THE TURTLE MOVES", 7.5, (0, -18), 0), (f'v{__version__}', 6.0, (0, -31), 0)], 0.6)
     export(m, os.path.join(out_dir, 'great_atuin_base.stl'))
+    # the same base split in two for a two-colour print; together they are exactly `m`
+    region = to_manifold(*mesh_sdf('elephants', P, ELEPHANT_BOUNDS, P.resolution))
+    for el in ELEPHANTS:
+        region += Manifold.cylinder(P.peg_h + 3, pr + 0.5, circular_segments=64).translate(
+            (el.o[0], el.o[1], Z_TOP - 1.0))
+    export(m - region, os.path.join(out_dir, 'great_atuin_base_turtle.stl'), 0.05)
+    export(m ^ region, os.path.join(out_dir, 'great_atuin_base_elephants.stl'), 0.05)
     print(f'  ({time.time() - t:.0f}s)')
 
 

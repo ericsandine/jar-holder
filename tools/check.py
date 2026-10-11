@@ -6,11 +6,16 @@
 
 Checks each part is a single watertight solid that fits the build plate, slices it
 at 0.2 mm like a printer to find islands (regions that would start in mid-air),
-summarises steep overhangs, and measures the peg / hole / pocket fit.
+summarises steep overhangs, and measures the peg / hole / pocket fit. Also checks the
+two-colour split (turtle + elephants is exactly the base) and that the Bambu Studio
+project assigns the filaments in filaments.json.
 """
 import argparse
+import json
 import os
 import sys
+import xml.etree.ElementTree as ET
+import zipfile
 
 import numpy as np
 import trimesh
@@ -102,6 +107,44 @@ def main():
         check(wall.any() and abs(2 * r[wall].mean() - 2 * rp) < 0.05,
               f'pocket {2 * r[wall].mean():.2f} mm across, {P.pocket_depth:.0f} mm deep, '
               f'for a {P.jar_diameter:.1f} mm jar')
+
+    print('two-colour split')
+    split = {k: os.path.join(ROOT, f'great_atuin_base_{k}.stl') for k in ('turtle', 'elephants')}
+    if all(os.path.exists(p) for p in split.values()) and 'base' in meshes:
+        from manifold3d import Manifold, Mesh
+        parts = {k: trimesh.load(p) for k, p in split.items()}
+        man = {k: Manifold(Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                tri_verts=np.asarray(m.faces, np.uint32))) for k, m in parts.items()}
+        for k, m in parts.items():
+            check(m.is_watertight and m.is_winding_consistent, f'{k} part is watertight')
+        total = parts['turtle'].volume + parts['elephants'].volume
+        check(abs(total - meshes['base'].volume) < 1.0,
+              f"turtle + elephants = base ({total / 1000:.1f} vs {meshes['base'].volume / 1000:.1f} cm3)")
+        overlap = (man['turtle'] ^ man['elephants']).volume()
+        check(overlap < 0.01, f'parts do not overlap ({overlap:.3f} mm3 shared)')
+    else:
+        check(False, 'split parts missing (run: make stl)')
+
+    project = os.path.join(ROOT, f'great_atuin_{P.jar_diameter:.1f}mm.3mf')
+    print(os.path.basename(project))
+    if os.path.exists(project):
+        fil = json.load(open(os.path.join(ROOT, 'filaments.json')))['parts']
+        with zipfile.ZipFile(project) as z:
+            model = z.read('Metadata/model_settings.config').decode()
+            cfg = json.loads(z.read('Metadata/project_settings.config'))
+        assigned = {}   # part name -> filament; a part without its own uses its object's
+        for obj in ET.fromstring(model).iter('object'):
+            meta = {m.get('key'): m.get('value') for m in obj.findall('metadata')}
+            for part in obj.iter('part'):
+                pm = {m.get('key'): m.get('value') for m in part.findall('metadata')}
+                assigned[pm.get('name')] = pm.get('extruder', meta.get('extruder'))
+        want = {f['label']: str(i + 1) for i, f in enumerate(fil)}
+        check(assigned == want, f'parts on their filaments: {assigned}')
+        check(cfg.get('filament_colour') == [f['hex'] for f in fil] and
+              cfg.get('filament_settings_id') == [f['preset'] for f in fil],
+              f"filaments match filaments.json: {cfg.get('filament_colour')}")
+    else:
+        print('  info  not built (run: make 3mf; needs Bambu Studio)')
 
     print('PASS' if not failures else f'{len(failures)} check(s) FAILED')
     sys.exit(1 if failures else 0)

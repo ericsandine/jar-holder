@@ -3,9 +3,11 @@
     blender -b -P tools/render.py -- [--jar-diameter 152.4] [--views hero,base] [--res 1400]
 
 Writes renders/<view>.png. Views: hero assembled base elephants head rimfall
-underside_base underside_disc (default: all).
+underside_base underside_disc (default: all). Parts are coloured with the filaments
+in filaments.json.
 """
 import argparse
+import json
 import math
 import os
 import sys
@@ -60,6 +62,36 @@ def material(name, color, rough=0.5, metal=0.0):
     return m
 
 
+def filament_material(f):
+    """A material that looks like the filament: matte, or with Galaxy's glitter."""
+    lin = [(c / 255) / 12.92 if c / 255 <= 0.04045 else ((c / 255 + 0.055) / 1.055) ** 2.4
+           for c in (int(f['hex'][i:i + 2], 16) for i in (1, 3, 5))]
+    if f['filament'] == 'PLA Matte':
+        return material(f['part'], lin, 0.85)
+    m = material(f['part'], lin, 0.4, 0.1)
+    if f['filament'] == 'PLA Galaxy':     # gold sparkle: tiny metallic flecks
+        nt = m.node_tree
+        coord = nt.nodes.new('ShaderNodeTexCoord')    # object space, so the flecks are mm-sized
+        vor = nt.nodes.new('ShaderNodeTexVoronoi')
+        vor.inputs['Scale'].default_value = 1.2
+        nt.links.new(coord.outputs['Object'], vor.inputs['Vector'])
+        ramp = nt.nodes.new('ShaderNodeValToRGB')
+        ramp.color_ramp.elements[0].position = 0.06
+        ramp.color_ramp.elements[0].color = (1, 1, 1, 1)
+        ramp.color_ramp.elements[1].position = 0.08
+        ramp.color_ramp.elements[1].color = (0, 0, 0, 1)
+        nt.links.new(vor.outputs['Distance'], ramp.inputs['Fac'])
+        mix = nt.nodes.new('ShaderNodeMix')
+        mix.data_type = 'RGBA'
+        mix.inputs['A'].default_value = (*lin, 1)
+        mix.inputs['B'].default_value = (0.9, 0.65, 0.25, 1)
+        nt.links.new(ramp.outputs['Color'], mix.inputs['Factor'])
+        bsdf = nt.nodes['Principled BSDF']
+        nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
+        nt.links.new(ramp.outputs['Color'], bsdf.inputs['Metallic'])
+    return m
+
+
 def load(path, mat):
     bpy.ops.wm.stl_import(filepath=path)
     o = bpy.context.selected_objects[0]
@@ -69,6 +101,7 @@ def load(path, mat):
     return o
 
 
+FIL = {f['part']: f for f in json.load(open(os.path.join(ROOT, 'filaments.json')))['parts']}
 def light(name, kind, energy, loc=None, rot=None, size=None, target=None):
     o = bpy.data.objects.new(name, bpy.data.lights.new(name, kind))
     o.data.energy = energy
@@ -84,11 +117,12 @@ def light(name, kind, energy, loc=None, rot=None, size=None, target=None):
     return o
 
 
-base = load(os.path.join(ROOT, 'great_atuin_base.stl'), material('turtle', (0.33, 0.40, 0.27), 0.45, 0.3))
-top = max((base.matrix_world @ Vector(c)).z for c in base.bound_box)
+base = load(os.path.join(ROOT, FIL['turtle']['stl']), filament_material(FIL['turtle']))
+elephants = load(os.path.join(ROOT, FIL['elephants']['stl']), filament_material(FIL['elephants']))
+top = max((elephants.matrix_world @ Vector(c)).z for c in elephants.bound_box)
 disc_z = top - PEG_H
-disc = load(os.path.join(ROOT, f'great_atuin_disc_{args.jar_diameter:.1f}mm.stl'),
-            material('disc', (0.16, 0.36, 0.62), 0.4))
+disc = load(os.path.join(ROOT, FIL['disc']['stl'].format(jar=f'{args.jar_diameter:.1f}')),
+            filament_material(FIL['disc']))
 
 bpy.ops.mesh.primitive_cylinder_add(vertices=128, radius=args.jar_diameter / 2, depth=JAR_H)
 jar = bpy.context.object
@@ -120,6 +154,7 @@ def shoot(name, target, az, el, dist, lens=60, ortho=None, show=(), rot=None, di
     objs = {'base': base, 'disc': disc, 'jar': jar, 'floor': floor}
     for key, o in objs.items():
         o.hide_render = key not in show
+    elephants.hide_render = 'base' not in show
     below.hide_render = 'floor' in show
     disc.location.z = disc_z if disc_at is None else disc_at
     jar.location = (0, 0, disc_z + FLOOR + JAR_H / 2)
