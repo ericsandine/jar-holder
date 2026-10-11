@@ -163,6 +163,20 @@ make all       # stl + 3mf + check + renders
 The engraving uses macOS's Luminari font. On other systems it falls back to a bold sans font,
 which changes how the engraved text looks.
 
+### Built with
+
+| Tool | Used for |
+|---|---|
+| [NumPy](https://numpy.org) | The signed distance fields. The shell, scutes, craters, elephants and Rimfall are built from spheres, ellipsoids, tapered tubes and tori. |
+| [scikit-image](https://scikit-image.org) | Marching cubes, run only on blocks near the surface and spread across all CPU cores |
+| [SciPy](https://scipy.org) | A KD-tree that welds near-duplicate vertices so the STLs are watertight |
+| [manifold3d](https://github.com/elalish/manifold) | Exact booleans: the jar pocket, pegs, peg holes, engraving and the two-colour split |
+| [Matplotlib](https://matplotlib.org) and [Shapely](https://shapely.readthedocs.io) | Turning engraved text into outlines and cleaning them up so they cut cleanly |
+| [trimesh](https://trimesh.org) | STL export, and the 0.2 mm slices `tools/check.py` uses to find islands |
+| [Bambu Studio](https://bambulab.com/en/download/studio) | Its command line builds and slices the 3MF, using Bambu's own printer and filament profiles and purge table |
+| [Blender](https://www.blender.org) 4.x | Headless Cycles renders for `renders/` |
+| [GitHub CLI](https://cli.github.com) | Tagged releases with the STLs and 3MF attached |
+
 Contributors and AI agents: [AGENTS.md](AGENTS.md) has the full iteration checklist, the
 design rules and the release process.
 
