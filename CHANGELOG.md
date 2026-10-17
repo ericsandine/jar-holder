@@ -5,6 +5,34 @@ MAJOR means the base/Disc fit changed, MINOR a visible design change, PATCH prin
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-17
+
+### Added
+- **Separate elephants.** `great_atuin_elephant.stl` is one World Elephant: print four. Each
+  stands on flat soles, and its feet and trunk tip drop into a socket in the shell (about
+  2–14 mm deep, 0.2 mm clearance per side). All four are identical, so any elephant fits any
+  socket.
+- **`great_atuin_turtle.stl`**, the turtle with the four sockets.
+- **`exploded` render**, showing the elephants lifted out of their sockets.
+- **Checks** that each elephant drops into its socket, still clears it when nudged 0.1 mm each
+  way, and stands on the socket floor. `tools/check.py --dir` checks a draft build.
+
+### Changed
+- **The Bambu Studio project has three single-colour plates:** turtle, elephants, Disc. There
+  are no filament changes or purging, and no AMS is needed. Estimates: turtle about 5 h 40 m
+  and 261 g, elephants about 2 h and 68 g, Disc about 2 h 30 m and 118 g.
+- **The elephants' feet** follow the shell height averaged over all four positions, so they
+  are one shape; toes and trunk tips move by under 1 mm. A short pillar under each trunk's
+  curl, hidden in the socket, lets it print standing up.
+- **`great_atuin_base.stl`** is now the turtle and elephants fused, for a one-colour print
+  with nothing to assemble. The feet no longer blend into the shell with a small fillet.
+- The version engraved under the turtle and the Disc reads v1.2.0. The Disc fits 1.0 and 1.1
+  bases, and the reverse.
+
+### Removed
+- The two-colour split, `great_atuin_base_turtle.stl` and `great_atuin_base_elephants.stl`.
+  They are still attached to the v1.1.0 release.
+
 ## [1.1.0] - 2026-10-10
 
 ### Added
@@ -52,6 +80,7 @@ MAJOR means the base/Disc fit changed, MINOR a visible design change, PATCH prin
   - `tools/render.py`: Blender renders for the README.
   - A `Makefile`.
 
-[Unreleased]: https://github.com/ericsandine/jar-holder/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ericsandine/jar-holder/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ericsandine/jar-holder/releases/tag/v1.2.0
 [1.1.0]: https://github.com/ericsandine/jar-holder/releases/tag/v1.1.0
 [1.0.0]: https://github.com/ericsandine/jar-holder/releases/tag/v1.0.0

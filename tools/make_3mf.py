@@ -4,9 +4,11 @@
     .venv/bin/python tools/make_3mf.py [--jar-diameter 152.4] [--slice]
 
 Writes great_atuin_<D>mm.3mf:
-  plate 1  the base, as two parts: the turtle on filament 1, the elephants on filament 2
-  plate 2  the Disc on filament 3
-Filament presets and colours come from filaments.json.
+  plate 1  the turtle on filament 1
+  plate 2  the four elephants on filament 2
+  plate 3  the Disc on filament 3
+Every plate prints in one colour, so there are no filament changes. Filament presets
+and colours come from filaments.json.
 
 The project is written as a plain 3MF with Bambu's part/filament metadata, then
 loaded and re-saved by the Bambu Studio command line, so the result is a native
@@ -17,6 +19,7 @@ Studio and prints the time, filament and colour changes per plate.
 import argparse
 import glob
 import json
+import math
 import os
 import subprocess
 import sys
@@ -45,14 +48,19 @@ def mesh_xml(oid, name, m):
 
 
 def raw_3mf(path, objects):
-    """objects: [(name, plate, [(part_name, mesh, filament), ...])], meshes in model coordinates."""
+    """objects: [(name, plate, [(part_name, mesh, filament), ...], (dx, dy))], meshes in model
+    coordinates; each object is centred (dx, dy) from the middle of its plate."""
     meshes, comps, items, settings, plates = [], [], [], [], {}
     oid = 0
-    for name, plate, parts in objects:
+    # plates sit in a grid of ceil(sqrt(n)) columns, rows going towards -y
+    # (PartPlateList::compute_colum_count and compute_origin in Bambu Studio)
+    cols = math.ceil(math.sqrt(max(o[1] for o in objects)) - 1e-9)
+    for name, plate, parts, (dx, dy) in objects:
         lo = np.min([m.bounds[0] for _, m, _ in parts], axis=0)
         hi = np.max([m.bounds[1] for _, m, _ in parts], axis=0)
-        tx = (plate - 1) * PLATE_PITCH + BED / 2 - (lo[0] + hi[0]) / 2
-        ty = BED / 2 - (lo[1] + hi[1]) / 2
+        row, col = divmod(plate - 1, cols)
+        tx = col * PLATE_PITCH + BED / 2 + dx - (lo[0] + hi[0]) / 2
+        ty = -row * PLATE_PITCH + BED / 2 + dy - (lo[1] + hi[1]) / 2
         part_ids, xml_parts = [], []
         for part_name, m, filament in parts:
             oid += 1
@@ -129,7 +137,8 @@ def flush_matrix(colours):
 
 def finish_project(path, colours, bed='Textured PEI Plate', tower=(218, 200)):
     """Patch the saved project settings: our filament colours and their purge volumes, the
-    P2S's stock plate, and a prime tower in the empty back-right corner of plate 1."""
+    P2S's stock plate, and a prime tower clear of the turtle in case a plate is ever given
+    two colours."""
     tmp = path + '.tmp'
     with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
@@ -174,8 +183,13 @@ def main():
     out = os.path.join(ROOT, f'great_atuin_{jar}mm.3mf')
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, 'raw.3mf')
-        raw_3mf(raw, [("Great A'Tuin", 1, [(parts[k]['label'], load[k], fil[k]) for k in ('turtle', 'elephants')]),
-                      ('The Disc', 2, [(parts['disc']['label'], load['disc'], fil['disc'])])])
+        el = load['elephants']
+        gx, gy = el.extents[0] / 2 + 8, el.extents[1] / 2 + 8          # a 2 x 2 grid, 16 mm apart
+        herd = [(n.title(), 2, [(n.title(), el, fil['elephants'])], (sx * gx, sy * gy))
+                for n, (sx, sy) in zip(atuin.EL_NAMES, ((-1, 1), (1, 1), (-1, -1), (1, -1)))]
+        raw_3mf(raw, [(parts['turtle']['label'], 1, [(parts['turtle']['label'], load['turtle'], fil['turtle'])], (0, 0)),
+                      *herd,
+                      (parts['disc']['label'], 3, [(parts['disc']['label'], load['disc'], fil['disc'])], (0, 0))])
         def flat(kind, name):
             path = os.path.join(tmp, f'{kind}_{len(os.listdir(tmp))}.json')
             json.dump(resolved_profile(kind, name), open(path, 'w'))

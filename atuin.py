@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Great A'Tuin jar stand: parametric generator for two printable STLs.
+"""Great A'Tuin jar stand: parametric generator for the printable STLs.
 
-  great_atuin_base.stl       Great A'Tuin swimming through space, her shell pocked
-                             with meteor craters, carrying Berilia, Tubul,
-                             Great T'Phon and Jerakeen on her back.
+  great_atuin_turtle.stl     Great A'Tuin swimming through space, her shell pocked
+                             with meteor craters and four sockets for the elephants.
+  great_atuin_elephant.stl   A World Elephant; print four (Berilia, Tubul, Great T'Phon
+                             and Jerakeen). Their feet drop into the sockets.
   great_atuin_disc_<D>mm.stl The Disc. The jar sits down in a pocket in its top and
                              the Rimfall pours off its edge. Holes underneath key
                              onto pegs on the elephants' backs.
+  great_atuin_base.stl       The turtle and elephants as one piece, for a one-colour
+                             print with nothing to assemble.
 
-For a two-colour base (grey elephants on a green turtle) the base is also written
-as two parts that fit together exactly, great_atuin_base_turtle.stl and
-great_atuin_base_elephants.stl; tools/make_3mf.py packs them into a Bambu Studio
-project with a filament assigned to each.
+The separate pieces print in their own colours with no filament changes;
+tools/make_3mf.py lays them out on three plates of a Bambu Studio project.
 
 Only the disc depends on the jar, so once you have an exact measurement you only
 need to regenerate and reprint the disc:
@@ -38,7 +39,7 @@ import numpy as np
 # Semantic version of the printable geometry, engraved under both parts.
 # MAJOR: base/disc interface changed (old discs no longer fit new bases).
 # MINOR: visible design change or new default jar. PATCH: printability/mesh fixes.
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 
 
 @dataclass
@@ -342,12 +343,44 @@ def tail(p):
     return flat(lambda q: tube(q, _ground_chain(TAIL, 1.0)), 1.0, p)
 
 
-# The four World Elephants, facing outward on the diagonals.
+# The four World Elephants, facing outward on the diagonals. Each prints on its own,
+# standing on flat soles at EL_SOLE_Z, and its feet drop into sockets in the shell.
 EL_R = 40.0                # distance from shell centre to each elephant's back
 EL_LEG_SHOW = 11.0         # leg visible under the belly (at the body centre)
 EL_NAMES = ("BERILIA", "TUBUL", "GREAT T'PHON", "JERAKEEN")
 EL_ANGLES = (45.0, 135.0, 225.0, 315.0)
 LEGS = ((10.5, 8.0), (10.5, -8.0), (-10.5, 8.0), (-10.5, -8.0))
+EL_LEG_R = 6.0             # leg radius where it meets the shell
+EL_SOCKET = 2.0            # depth of the shallowest socket
+EL_FIT = 0.2               # socket clearance per side
+PLANT = (0.0, 0.3, 0.6)    # where along the trunk's last bend it is planted (0 = the tip)
+
+
+def _el_world(angle_deg, lx, ly):
+    t = math.radians(angle_deg)
+    c, s = math.cos(t), math.sin(t)
+    return (EL_R * c + lx * c - ly * s, EL_R * s + lx * s + ly * c)
+
+
+def _el_ground(lx, ly):
+    """Shell height under an elephant's local (lx, ly), averaged over the four elephants
+    and both sides. The feet follow it, so all four are one shape and fit any socket."""
+    return float(np.mean([shell_top_z(*_el_world(a, lx, s * ly)) for a in EL_ANGLES for s in (1, -1)]))
+
+
+def _sole_z():
+    """Plane of the soles: EL_SOCKET below the lowest shell under any foot or the trunk,
+    rounded down to a 0.2 mm layer."""
+    th = np.linspace(0.0, 2 * math.pi, 72, endpoint=False)
+    ring = [(lx + (EL_LEG_R + 0.5) * math.cos(t), ly + (EL_LEG_R + 0.5) * math.sin(t))
+            for lx, ly in LEGS for t in th]
+    ring += [(16.0 + 5.5 * f + (3.7 + 0.5 * f) * math.cos(t), (3.7 + 0.5 * f) * math.sin(t))
+             for f in PLANT for t in th]
+    low = min(float(shell_top_z(*_el_world(a, lx, ly))) for a in EL_ANGLES for lx, ly in ring)
+    return round(math.floor((low - EL_SOCKET) / 0.2) * 0.2, 1)
+
+
+EL_SOLE_Z = _sole_z()
 
 
 class Elephant:
@@ -355,6 +388,7 @@ class Elephant:
         t = math.radians(angle_deg)
         self.c, self.s = math.cos(t), math.sin(t)
         self.o = np.array([EL_R * self.c, EL_R * self.s, z_top])
+        self.sole = EL_SOLE_Z - z_top
         self.legs = [(lx, ly, self.ground(lx, ly)) for lx, ly in LEGS]
         self.toes = [(lx + 5.4, ly + o, self.ground(lx + 5.4, ly + o) + 1.0)
                      for lx, ly in LEGS for o in (-2.4, 0.0, 2.4)]
@@ -362,6 +396,8 @@ class Elephant:
         tip = min(self.ground(16.0, 0) + 2.7, -37.5)
         self.trunk = [(27.5, 0, -19, 5.6), (30.5, 0, -25.5, 4.8), (28.0, 0, -31.5, 4.2),
                       (21.5, 0, -36.5, 3.7), (16.0, 0, tip, 3.2)]
+        # where it rests, the trunk is planted in the shell, so it prints standing up
+        self.plant = [(16.0 + 5.5 * f, tip + (-36.5 - tip) * f, 3.2 + 0.5 * f) for f in PLANT]
         bc = self.world_xy(7.0, 0.0)
         self.bound_c = (bc[0], bc[1], z_top - 25.0)
         self.bound_r = 46.0
@@ -370,7 +406,7 @@ class Elephant:
         return (self.o[0] + lx * self.c - ly * self.s, self.o[1] + lx * self.s + ly * self.c)
 
     def ground(self, lx, ly):
-        return float(shell_top_z(*self.world_xy(lx, ly))) - self.o[2]
+        return _el_ground(lx, ly) - self.o[2]
 
     def sdf(self, p):
         d0 = p - self.o
@@ -385,19 +421,34 @@ class Elephant:
         # flat belly: it prints as a bridge between the legs instead of starting in mid-air
         d = smax(d, -(q[:, 2] + 22.0), 1.5)
         for lx, ly, g in self.legs:
-            d = smin(d, round_cone(q, (lx, ly, -14), (lx, ly, g - 3), 5.3, 6.0), 4.0)
+            d = smin(d, round_cone(q, (lx, ly, -14), (lx, ly, g - 3), 5.3, EL_LEG_R), 4.0)
         for toe in self.toes:
             d = smin(d, sphere(q, toe, 1.25), 0.4)
         d = smin(d, tube(q, self.trunk), 3.0)
         for s in (1, -1):
             d = smin(d, round_cone(q, (26, 5.5 * s, -20), (32.5, 8.5 * s, -13.5), 1.9, 0.9), 1.0)
             d = smin(d, sphere(q, (26.5, 7.6 * s, -9.5), 1.6), 0.4)         # eye
+        # inside the sockets, below the shell surface: legs and trunk reach down to the soles
+        for lx, ly, g in self.legs:
+            d = np.minimum(d, round_cone(q, (lx, ly, g - 3), (lx, ly, self.sole - EL_LEG_R),
+                                         EL_LEG_R, EL_LEG_R))
+        for x, z, r in self.plant:
+            d = np.minimum(d, round_cone(q, (x, 0, z), (x, 0, self.sole - r), r, r))
         return smax(d, q[:, 2], 1.5)    # flat top for the Disc to rest on
 
 
 Z_TOP = round(max(float(shell_top_z(EL_R * math.cos(math.radians(a)), EL_R * math.sin(math.radians(a))))
                   for a in EL_ANGLES) + 24.0 + EL_LEG_SHOW, 2)
 ELEPHANTS = [Elephant(a, Z_TOP) for a in EL_ANGLES]
+EL_PIECE = Elephant(0.0, Z_TOP)   # the one that gets printed; the four are copies of it turned into place
+
+
+def placement(angle_deg):
+    """4x4 transform from great_atuin_elephant.stl to the elephant at that angle on the turtle."""
+    t = math.radians(angle_deg)
+    c, s = math.cos(t), math.sin(t)
+    return np.array([[c, -s, 0, EL_R * c], [s, c, 0, EL_R * s], [0, 0, 1, EL_SOLE_Z], [0, 0, 0, 1]])
+
 
 FRONT_BOUND = ((38.0, 76.0, 4.0), 56.0)
 REAR_BOUND = ((-66.0, 58.0, 4.0), 47.0)
@@ -405,7 +456,7 @@ TAIL_BOUND = ((-88.0, 0.0, 4.0), 22.0)
 HEAD_BOUND = ((SHELL_A + 8.0, 0.0, 22.0), 48.0)
 
 
-def base_sdf(p):
+def turtle_sdf(p):
     d = np.maximum(dome(p), skirt(p))
     d = scute_grooves(p, d)
     d = craters(p, d)
@@ -415,24 +466,18 @@ def base_sdf(p):
     d = smin(d, bounded(q, *FRONT_BOUND, front_flipper), 5.0)
     d = smin(d, bounded(q, *REAR_BOUND, rear_flipper), 5.0)
     d = smin(d, bounded(p, *TAIL_BOUND, tail), 4.0)
-    for el in ELEPHANTS:
-        d = smin(d, bounded(p, el.bound_c, el.bound_r, el.sdf), 3.0)
     return np.maximum(d, -p[:, 2])
 
 
-BASE_BOUNDS = ((-112.0, -128.0, -1.0), (146.0, 128.0, Z_TOP + 2.0))
+TURTLE_BOUNDS = ((-112.0, -128.0, -1.0), (146.0, 128.0, SHELL_RIM_Z + SHELL_C + 6.0))
 
 
-def elephants_region(p):
-    """Where the elephants' filament goes: the elephants grown by 0.8 mm, so the region
-    contains their printed skin, but only outside the shell, so it never takes turtle."""
-    d = np.full(len(p), np.inf)
-    for el in ELEPHANTS:
-        d = np.minimum(d, bounded(p, el.bound_c, el.bound_r, el.sdf))
-    return np.maximum(d - 0.8, -dome(p))
+def elephant_sdf(p):
+    """One elephant as printed, cut flat at its soles."""
+    return np.maximum(EL_PIECE.sdf(p), EL_SOLE_Z - p[:, 2])
 
 
-ELEPHANT_BOUNDS = ((-80.0, -80.0, 30.0), (80.0, 80.0, Z_TOP + 2.0))
+EL_PIECE_BOUNDS = ((EL_R - 26.0, -22.0, EL_SOLE_Z - 1.0), (EL_R + 40.0, 22.0, Z_TOP + 1.0))
 
 
 # ------------------------------------------------------------------- the Disc
@@ -479,10 +524,10 @@ _W = {}
 
 
 def _sdf_for(part, P):
-    if part == 'base':
-        return base_sdf
-    if part == 'elephants':
-        return elephants_region
+    if part == 'turtle':
+        return turtle_sdf
+    if part == 'elephant':
+        return elephant_sdf
     return lambda p: disc_sdf(p, P)
 
 
@@ -611,25 +656,49 @@ def export(m, path, min_volume=1.0):
           f'{m.volume() / 1000:.0f} cm^3 solid')
 
 
+def _despike(cs, eps=1e-3):
+    """Clipper's offsets and simplify() can leave zero-area loops and zero-width spikes in an
+    outline. Extruded and cut from a solid, a spike leaves a crack with no thickness, so
+    drop every vertex where the outline doubles back on itself."""
+    from manifold3d import CrossSection, FillRule
+    loops = []
+    for p in cs.to_polygons():
+        p = np.asarray(p, float)
+        while len(p) >= 3:
+            a, b = p - np.roll(p, 1, 0), np.roll(p, -1, 0) - p
+            la, lb = np.linalg.norm(a, axis=1), np.linalg.norm(b, axis=1)
+            back = ((a * b).sum(1) < -0.9 * la * lb) | (la < eps)
+            if not back.any():
+                break
+            p = p[~back]
+        if len(p) >= 3:
+            loops.append(p)
+    return CrossSection(loops, FillRule.Positive)
+
+
 def build_base(P, out_dir):
-    from manifold3d import Manifold
+    """The turtle with its sockets, the elephant, and the two fused as the one-piece base."""
+    from manifold3d import JoinType, Manifold, OpType
     t = time.time()
-    m = to_manifold(*mesh_sdf('base', P, BASE_BOUNDS, P.resolution)).simplify(0.02)
+    turtle = to_manifold(*mesh_sdf('turtle', P, TURTLE_BOUNDS, P.resolution)).simplify(0.02)
+    turtle -= text_solid([("GREAT A'TUIN", 13.0, (0, 14), 0), ("Chelys galactica", 7.5, (0, -3), 0),
+                          ("THE TURTLE MOVES", 7.5, (0, -18), 0), (f'v{__version__}', 6.0, (0, -31), 0)], 0.6)
+    el = to_manifold(*mesh_sdf('elephant', P, EL_PIECE_BOUNDS, min(P.resolution, 0.25))).simplify(0.02)
     pr, ch = P.peg_d / 2, 0.6
-    for el in ELEPHANTS:
-        peg = (Manifold.cylinder(P.peg_h + 1 - ch, pr, circular_segments=64)
-               + Manifold.cylinder(ch, pr, pr - ch, circular_segments=64).translate((0, 0, P.peg_h + 1 - ch)))
-        m += peg.translate((el.o[0], el.o[1], Z_TOP - 1.0))
-    m -= text_solid([("GREAT A'TUIN", 13.0, (0, 14), 0), ("Chelys galactica", 7.5, (0, -3), 0),
-                     ("THE TURTLE MOVES", 7.5, (0, -18), 0), (f'v{__version__}', 6.0, (0, -31), 0)], 0.6)
-    export(m, os.path.join(out_dir, 'great_atuin_base.stl'))
-    # the same base split in two for a two-colour print; together they are exactly `m`
-    region = to_manifold(*mesh_sdf('elephants', P, ELEPHANT_BOUNDS, P.resolution))
-    for el in ELEPHANTS:
-        region += Manifold.cylinder(P.peg_h + 3, pr + 0.5, circular_segments=64).translate(
-            (el.o[0], el.o[1], Z_TOP - 1.0))
-    export(m - region, os.path.join(out_dir, 'great_atuin_base_turtle.stl'), 0.05)
-    export(m ^ region, os.path.join(out_dir, 'great_atuin_base_elephants.stl'), 0.05)
+    peg = (Manifold.cylinder(P.peg_h + 1 - ch, pr, circular_segments=64)
+           + Manifold.cylinder(ch, pr, pr - ch, circular_segments=64).translate((0, 0, P.peg_h + 1 - ch)))
+    el += peg.translate((EL_R, 0, Z_TOP - 1.0))
+    placed = [el.rotate((0, 0, a)) for a in EL_ANGLES]
+    export(Manifold.batch_boolean([turtle, *placed], OpType.Add), os.path.join(out_dir, 'great_atuin_base.stl'))
+    # each socket is the shadow of an elephant's buried feet plus clearance, cut down to
+    # the soles. Closing the shadow leaves no slivers of shell between neighbouring feet.
+    sockets = []
+    for e in placed:
+        shadow = _despike((e ^ turtle).project().offset(EL_FIT, JoinType.Round)
+                          .offset(0.6, JoinType.Round).offset(-0.6, JoinType.Round).simplify(0.01))
+        sockets.append(shadow.extrude(Z_TOP - EL_SOLE_Z).translate((0, 0, EL_SOLE_Z)))
+    export(turtle - Manifold.batch_boolean(sockets, OpType.Add), os.path.join(out_dir, 'great_atuin_turtle.stl'))
+    export(el.translate((-EL_R, 0, -EL_SOLE_Z)), os.path.join(out_dir, 'great_atuin_elephant.stl'))
     print(f'  ({time.time() - t:.0f}s)')
 
 

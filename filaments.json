@@ -5,7 +5,7 @@
     {
       "part": "turtle",
       "label": "Great A'Tuin",
-      "stl": "great_atuin_base_turtle.stl",
+      "stl": "great_atuin_turtle.stl",
       "filament": "PLA Galaxy",
       "color": "Green",
       "code": "13503",
@@ -17,7 +17,7 @@
     {
       "part": "elephants",
       "label": "World Elephants",
-      "stl": "great_atuin_base_elephants.stl",
+      "stl": "great_atuin_elephant.stl",
       "filament": "PLA Matte",
       "color": "Ash Gray",
       "code": "11102",

@@ -6,9 +6,10 @@
 
 Checks each part is a single watertight solid that fits the build plate, slices it
 at 0.2 mm like a printer to find islands (regions that would start in mid-air),
-summarises steep overhangs, and measures the peg / hole / pocket fit. Also checks the
-two-colour split (turtle + elephants is exactly the base) and that the Bambu Studio
-project assigns the filaments in filaments.json.
+summarises steep overhangs, and measures the peg / hole / pocket fit. Also checks that
+each elephant drops into its socket in the turtle with clearance all round and stands
+on the socket floor, and that the Bambu Studio project assigns the filaments in
+filaments.json. --dir checks a draft folder instead of the repo.
 """
 import argparse
 import json
@@ -52,11 +53,12 @@ def overhang_area(m, deg):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--jar-diameter', type=atuin._length, default=atuin.Params.jar_diameter)
+    ap.add_argument('--dir', default=ROOT, help='folder with the STLs and 3MF')
     a = ap.parse_args()
     P = atuin.Params(jar_diameter=a.jar_diameter)
     rp, R, H = atuin.disc_dims(P)
-    paths = {'base': os.path.join(ROOT, 'great_atuin_base.stl'),
-             'disc': os.path.join(ROOT, f'great_atuin_disc_{P.jar_diameter:.1f}mm.stl')}
+    paths = {k: os.path.join(a.dir, f'great_atuin_{k}.stl') for k in ('turtle', 'elephant', 'base')}
+    paths['disc'] = os.path.join(a.dir, f'great_atuin_disc_{P.jar_diameter:.1f}mm.stl')
     failures = []
 
     def check(ok, msg):
@@ -83,7 +85,7 @@ def main():
         print(f'  info  overhang area: >55 deg {overhang_area(m, 55):.0f} mm2, '
               f'>65 deg {overhang_area(m, 65):.0f} mm2 (mostly bridged ceilings; see AGENTS.md)')
 
-    if len(meshes) == 2:
+    if 'base' in meshes and 'disc' in meshes:
         print('fit')
         b, d = meshes['base'].vertices, meshes['disc'].vertices
         z = atuin.Z_TOP
@@ -108,24 +110,30 @@ def main():
               f'pocket {2 * r[wall].mean():.2f} mm across, {P.pocket_depth:.0f} mm deep, '
               f'for a {P.jar_diameter:.1f} mm jar')
 
-    print('two-colour split')
-    split = {k: os.path.join(ROOT, f'great_atuin_base_{k}.stl') for k in ('turtle', 'elephants')}
-    if all(os.path.exists(p) for p in split.values()) and 'base' in meshes:
+    print('elephants in their sockets')
+    if 'turtle' in meshes and 'elephant' in meshes:
         from manifold3d import Manifold, Mesh
-        parts = {k: trimesh.load(p) for k, p in split.items()}
-        man = {k: Manifold(Mesh(vert_properties=np.asarray(m.vertices, np.float32),
-                                tri_verts=np.asarray(m.faces, np.uint32))) for k, m in parts.items()}
-        for k, m in parts.items():
-            check(m.is_watertight and m.is_winding_consistent, f'{k} part is watertight')
-        total = parts['turtle'].volume + parts['elephants'].volume
-        check(abs(total - meshes['base'].volume) < 1.0,
-              f"turtle + elephants = base ({total / 1000:.1f} vs {meshes['base'].volume / 1000:.1f} cm3)")
-        overlap = (man['turtle'] ^ man['elephants']).volume()
-        check(overlap < 0.01, f'parts do not overlap ({overlap:.3f} mm3 shared)')
+        man = lambda m: Manifold(Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                      tri_verts=np.asarray(m.faces, np.uint32)))
+        turtle, el = man(meshes['turtle']), man(meshes['elephant'])
+        for a_deg, name in zip(atuin.EL_ANGLES, atuin.EL_NAMES):
+            placed = el.transform(atuin.placement(a_deg)[:3])
+            overlap = (placed ^ turtle).volume()
+            # nudged 0.1 mm each way (and lifted off the floor), it must still not touch
+            loose = max((placed.translate((dx, dy, 0.01)) ^ turtle).volume()
+                        for dx, dy in ((0.1, 0), (-0.1, 0), (0, 0.1), (0, -0.1)))
+            stands = (placed.translate((0, 0, -0.1)) ^ turtle).volume()
+            check(overlap < 0.01 and loose < 0.01 and stands > 1.0,
+                  f'{name:13s} drops in ({overlap:.3f} mm3 overlap, {loose:.3f} mm3 when nudged 0.1 mm) '
+                  f'and stands on the socket floor at z = {atuin.EL_SOLE_Z:.1f}')
+        top = meshes['elephant'].vertices
+        rr = np.hypot(top[:, 0], top[:, 1])
+        seat = top[rr > P.peg_d / 2 + 0.2, 2].max() + atuin.EL_SOLE_Z
+        check(abs(seat - atuin.Z_TOP) < 0.01, f'elephant back is the disc seat (z = {seat:.2f})')
     else:
-        check(False, 'split parts missing (run: make stl)')
+        check(False, 'turtle or elephant missing (run: make stl)')
 
-    project = os.path.join(ROOT, f'great_atuin_{P.jar_diameter:.1f}mm.3mf')
+    project = os.path.join(a.dir, f'great_atuin_{P.jar_diameter:.1f}mm.3mf')
     print(os.path.basename(project))
     if os.path.exists(project):
         fil = json.load(open(os.path.join(ROOT, 'filaments.json')))['parts']
@@ -138,7 +146,8 @@ def main():
             for part in obj.iter('part'):
                 pm = {m.get('key'): m.get('value') for m in part.findall('metadata')}
                 assigned[pm.get('name')] = pm.get('extruder', meta.get('extruder'))
-        want = {f['label']: str(i + 1) for i, f in enumerate(fil)}
+        want = {f['label']: str(i + 1) for i, f in enumerate(fil) if f['part'] != 'elephants'}
+        want.update({n.title(): str(1 + [f['part'] for f in fil].index('elephants')) for n in atuin.EL_NAMES})
         check(assigned == want, f'parts on their filaments: {assigned}')
         check(cfg.get('filament_colour') == [f['hex'] for f in fil] and
               cfg.get('filament_settings_id') == [f['preset'] for f in fil],

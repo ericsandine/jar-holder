@@ -2,9 +2,9 @@
 
     blender -b -P tools/render.py -- [--jar-diameter 152.4] [--views hero,base] [--res 1400]
 
-Writes renders/<view>.png. Views: hero assembled base elephants head rimfall
+Writes renders/<view>.png. Views: hero assembled base elephants exploded head rimfall
 underside_base underside_disc (default: all). Parts are coloured with the filaments
-in filaments.json.
+in filaments.json, and the elephants are placed with atuin.placement().
 """
 import argparse
 import json
@@ -13,11 +13,15 @@ import os
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VIEWS = ('hero', 'assembled', 'base', 'elephants', 'head', 'rimfall', 'underside_base', 'underside_disc')
-PEG_H, FLOOR, JAR_H = 4.0, 8.0, 130.0   # must match atuin.Params; JAR_H is just for show
+sys.path.insert(0, ROOT)
+import atuin  # noqa: E402  (numpy only at import time, which Blender bundles)
+
+VIEWS = ('hero', 'assembled', 'base', 'elephants', 'exploded', 'head', 'rimfall', 'underside_base',
+         'underside_disc')
+FLOOR, JAR_H = atuin.Params.floor, 130.0   # JAR_H is just for show
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--jar-diameter', type=float, default=152.4)
@@ -118,9 +122,13 @@ def light(name, kind, energy, loc=None, rot=None, size=None, target=None):
 
 
 base = load(os.path.join(ROOT, FIL['turtle']['stl']), filament_material(FIL['turtle']))
-elephants = load(os.path.join(ROOT, FIL['elephants']['stl']), filament_material(FIL['elephants']))
-top = max((elephants.matrix_world @ Vector(c)).z for c in elephants.bound_box)
-disc_z = top - PEG_H
+elephants = [load(os.path.join(ROOT, FIL['elephants']['stl']), filament_material(FIL['elephants']))]
+elephants += [bpy.data.objects.new(f'elephant{i}', elephants[0].data) for i in (1, 2, 3)]
+for o, a in zip(elephants, atuin.EL_ANGLES):
+    if o.name not in scene.collection.objects:
+        scene.collection.objects.link(o)
+    o.matrix_world = Matrix(atuin.placement(a).tolist())
+disc_z = atuin.Z_TOP
 disc = load(os.path.join(ROOT, FIL['disc']['stl'].format(jar=f'{args.jar_diameter:.1f}')),
             filament_material(FIL['disc']))
 
@@ -150,11 +158,13 @@ scene.camera = cam
 cam.data.clip_end = 10000
 
 
-def shoot(name, target, az, el, dist, lens=60, ortho=None, show=(), rot=None, disc_at=None):
+def shoot(name, target, az, el, dist, lens=60, ortho=None, show=(), rot=None, disc_at=None, lift=0.0):
     objs = {'base': base, 'disc': disc, 'jar': jar, 'floor': floor}
     for key, o in objs.items():
         o.hide_render = key not in show
-    elephants.hide_render = 'base' not in show
+    for o in elephants:
+        o.hide_render = 'base' not in show
+        o.location.z = atuin.EL_SOLE_Z + lift
     below.hide_render = 'floor' in show
     disc.location.z = disc_z if disc_at is None else disc_at
     jar.location = (0, 0, disc_z + FLOOR + JAR_H / 2)
@@ -179,6 +189,7 @@ SHOTS = {
     'assembled': dict(target=(0, 0, 55), az=28, el=16, dist=640, lens=50, show=('base', 'disc', 'floor')),
     'base': dict(target=(5, 0, 42), az=-40, el=28, dist=400, lens=50, show=('base', 'floor')),
     'elephants': dict(target=(12, 8, 66), az=35, el=16, dist=360, lens=60, show=('base', 'floor')),
+    'exploded': dict(target=(5, 0, 72), az=-40, el=14, dist=470, lens=50, show=('base', 'floor'), lift=40),
     'head': dict(target=(105, 0, 32), az=-28, el=10, dist=290, lens=60, show=('base', 'floor')),
     'rimfall': dict(target=(55, -45, 10), az=-55, el=20, dist=280, lens=60, show=('disc', 'floor'), disc_at=0),
     'underside_base': dict(target=(0, 0, 0), az=0, el=-90, dist=1000, ortho=262, show=('base',), rot=UP),
